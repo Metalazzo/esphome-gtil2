@@ -1,0 +1,345 @@
+# =============================================================================
+# SUN-2000GTIL2-LCD (GridFree G2) — lecture Modbus RTU via le port DB-9 "WiFi Plug"
+# ESPHome 2026.10 · ESP32-C3 + convertisseur MAX3232 (TTL <-> RS-232)
+#
+# Protocole : Eybond/Deye Modbus RTU V100 (esclave 1, 9600 bauds, 8N1, FC 0x03)
+# Cartographie validée sur le manuel officiel du protocole + manuels G2 (der-kanal).
+#
+# Cablage DB-9 (cote onduleur) :
+#   broche 2 = RX onduleur (recoit)  <- sortie T1OUT du MAX3232 (TX de l'ESP32)
+#   broche 3 = TX onduleur (emmet)   -> entree R1IN du MAX3232 (RX de l'ESP32)
+#   broche 5 = GND                   -> GND commun ESP32/MAX3232
+#   broche 9 = VCC DC 5-12 V         -> alim ESP32 via hacheur abaisseur (VIN 5V)
+#
+# !!! CE PORT N'EST PAS GALVANIQUESLEMENT ISOLE DU SECTEUR !!!
+# Ne jamais brancher l'USB du PC et le 12 V du DB-9 en meme temps.
+# Flasher d'abord en USB, debrancher l'USB, puis alimenter par le DB-9.
+# Retirer le dongle WiFi d'origine (un seul maitre RS-232 sur le bus).
+# La pince du limiteur reste branchee sur son propre connecteur : le bridage
+# 0 injection continue de fonctionner localement, sans l'ESP32.
+# =============================================================================
+
+substitutions:
+  device_name: solar-gtil2
+  friendly_name: "Onduleur GridFree GTIL2"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: "SUN-2000GTIL2-LCD (G2) - Modbus RTU sur DB-9"
+  platformio_options:
+    board_build.flash_mode: dio
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Solar Fallback Hotspot"
+    password: !secret ap_password
+
+captive_portal:
+
+# ---------------------------------------------------------------- modbus ----
+uart:
+  id: mod_bus
+  tx_pin: GPIO4     # -> MAX3232 T1IN -> DB-9 broche 3 (RX de l'onduleur)
+  rx_pin: GPIO5     # <- MAX3232 R1OUT <- DB-9 broche 2 (TX de l'onduleur)
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+modbus:
+  id: modbus1
+  # Pas de broche de sens (flow_control) necessaire : le MAX3232 est full duplex.
+
+modbus_controller:
+  - id: gtil2
+    address: 0x01
+    modbus_id: modbus1
+    update_interval: 15s
+    setup_priority: -10
+
+# ---------------------------------------------------------------- capteurs --
+sensor:
+  # --- Energies ---
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Energie du jour"
+    address: 60
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Energie totale"
+    address: 63
+    register_type: holding
+    value_type: U_DWORD          # 63 (poids faible) + 64 (poids haut)
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Temps de production total"
+    address: 67
+    register_type: holding
+    value_type: U_DWORD          # 67 + 68
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: total_increasing
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Rendement onduleur"
+    address: 69
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    icon: "mdi:solar-power"
+    filters:
+      - multiply: 0.1
+
+  # --- Reseau AC ---
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Tension reseau"
+    address: 70
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Frequence reseau"
+    address: 79
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Puissance AC injectee"
+    address: 86
+    register_type: holding
+    value_type: U_DWORD          # 86 + 87
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # --- Solaire DC ---
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Puissance panneaux (DC)"
+    address: 82
+    register_type: holding
+    value_type: U_DWORD          # 82 + 83
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Tension panneaux (PV)"
+    address: 109
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # --- Limiteur (pince CT) ---
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Puissance limiteur"
+    address: 99
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    icon: "mdi:current-ac"
+
+  # --- Temperatures (registres 90-95 du protocole V100) ---------------------
+  # Echelle officielle : °C = brut/10 - 100  (0 °C -> 1000, 50,5 °C -> 1505)
+  # Un brut a 0 = registre non implemente par le firmware -> etat inconnu.
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Temperature dissipateur 1"
+    address: 90
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (x == 0) return NAN;
+      return x * 0.1 - 100.0;
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Temperature dissipateur 2"
+    address: 91
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (x == 0) return NAN;
+      return x * 0.1 - 100.0;
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Temperature inductance 1"
+    address: 92
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - lambda: 'return x == 0 ? NAN : x * 0.1 - 100.0;'
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Temperature transformateur"
+    address: 94
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (x == 0) return NAN;
+      return x * 0.1 - 100.0;
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Temperature ambiante"
+    address: 95
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (x == 0) return NAN;
+      return x * 0.1 - 100.0;
+
+  # --- DEBUG TEMPORAIRE : vide la totalite de la carte de registres 0-125 ---
+  # Logga (niveau INFO) tous les registres non nuls reelement implementes par
+  # le firmware de TON onduleur, a chaque cycle. Une fois la carte validee
+  # (premieres minutes de log), supprime ce capteur ou passe-le en internal.
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Scan registres 0-125 (debug)"
+    custom_pdu: [0x03, 0x00, 0x00, 0x00, 0x7D]   # FC03, adresse 0, 125 registres
+    response_size: 250
+    internal: true
+    lambda: |-
+      int nonzero = 0;
+      for (size_t i = 0; i + 1 < data.size(); i += 2) {
+        uint16_t w = ((uint16_t) data[i] << 8) | data[i + 1];
+        if (w != 0) {
+          nonzero++;
+          ESP_LOGI("gtil2_scan", "registre %u = %u (0x%04X)",
+                   (unsigned) (i / 2), (unsigned) w, w);
+        }
+      }
+      ESP_LOGI("gtil2_scan", "=== %d registres non nuls sur %d lus ===",
+               nonzero, (int)(data.size() / 2));
+      return nonzero;
+
+# ------------------------------------------------------------- text_sensors -
+text_sensor:
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Version protocole"
+    address: 2
+    register_type: holding
+    raw_encode: HEXBYTES
+    icon: "mdi:chip"
+    # 0100 = V1.00 (attendu). Temoigne de la version Reellement parle e par l'onduleur.
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Numero de serie"
+    address: 3
+    register_type: holding
+    response_size: 10             # registres 3..7 = 10 caracteres ASCII
+    raw_encode: ANSI
+    icon: "mdi:identifier"
+
+  - platform: modbus_controller
+    modbus_controller_id: gtil2
+    name: "${friendly_name} Etat onduleur"
+    address: 59
+    register_type: holding
+    raw_encode: HEXBYTES
+    icon: "mdi:power"
+    lambda: |-
+      uint16_t v = modbus::helpers::word_from_hex_str(x, 0);
+      switch (v) {
+        case 0: return std::string("Stand-by");
+        case 1: return std::string("Auto-test");
+        case 2: return std::string("Normal (production)");
+        case 3: return std::string("Warning");
+        case 4: return std::string("Defaut");
+        case 5: return std::string("Alarme");
+        default: return std::string("Inconnu (0x" + x + ")");
+      }

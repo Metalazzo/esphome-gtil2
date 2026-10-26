@@ -1,0 +1,14 @@
+# ESPHome / PlatformIO artefacts locaux
+.esphome/
+build/
+storage/
+*.log
+
+# Secrets : ne JAMAIS pousser le vrai secrets.yaml
+secrets.yaml
+*.secrets.yaml
+!secrets.example.yaml
+
+# Divers
+__pycache__/
+.DS_Store

@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate dummy secrets
+        run: |
+          KEY=$(python3 -c 'import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())')
+          cat > secrets.yaml <<EOF
+          wifi_ssid: ci
+          wifi_password: ci-password
+          ap_password: ci-password
+          ota_password: ci
+          api_key: "$KEY"
+          EOF
+
+      - name: Validate ESPHome config (official image)
+        run: |
+          docker run --rm -v "$PWD:/config" esphome/esphome:latest \
+            esphome config /config/solar-gtil2.yaml
