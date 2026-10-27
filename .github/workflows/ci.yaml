@@ -25,4 +25,4 @@ jobs:
       - name: Validate ESPHome config (official image)
         run: |
           docker run --rm -v "$PWD:/config" esphome/esphome:latest \
-            esphome config /config/solar-gtil2.yaml
+            config /config/solar-gtil2.yaml
