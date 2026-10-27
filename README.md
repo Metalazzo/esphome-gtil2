@@ -1,5 +1,7 @@
 # esphome-gtil2
 
+[![CI](https://github.com/Metalazzo/esphome-gtil2/actions/workflows/ci.yaml/badge.svg)](https://github.com/Metalazzo/esphome-gtil2/actions/workflows/ci.yaml)
+
 Bridge **ESPHome** pour onduleur GridFree **SUN-2000GTIL2-LCD (G2)** — lecture
 complète des données (tension, puissances, énergies, état, **température
 interne**) via le port **DB-9 « WiFi Plug »**, **sans ouvrir l'appareil** et
